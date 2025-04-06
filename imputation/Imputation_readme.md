@@ -1,9 +1,9 @@
 # Imputation of Sentinel-1 and Sentinel-2 images using U-Net
-This repository contains code for training a U-Net model to impute missing pixels in Sentinel-1 and Sentinel-2 images using MODIS data as a reference. The model is trained on cropped images of size 16x16 pixels.
+This repository contains code for training a U-Net model to impute missing pixels in Sentinel-1 and Sentinel-2 images using MODIS data as a reference. The model is trained on cropped images of size 64x64 pixels.
 
 ## Pre-requisites
 
-1. Cropped Images (MODIS, Sent-1 and Sent-2) of size 16x16 available in a directory.
+1. Cropped Images (MODIS, Sent-1 and Sent-2) of size 64x64 available in a directory.
 2. Install pytorch lightning and other dependencies.
 
 ## Training the U-Net model for imputation
