@@ -1,5 +1,5 @@
 # Imputation of Sentinel-1 and Sentinel-2 images using U-Net
-This repository contains code for training a U-Net model to impute missing pixels in Sentinel-1 and Sentinel-2 images using MODIS data as a reference. The model is trained on cropped images of size 64x64 pixels.
+This repository contains code for training a U-Net model to impute missing pixels in Sentinel-1 and Sentinel-2 images using MODIS data as a reference. The model is trained on cropped geotiffs of size 64x64 pixels.
 
 ## Pre-requisites
 
@@ -18,4 +18,4 @@ python3 imputation/imputation_model.py
 ```bash
 python3 imputation/perform_imputation.py        
 ```
-2. The imputed images will be saved in the `imputation/imputed_images` directory.
+2. The imputed images will be saved in the `imputation/imputed_s2` directory for Sentinel 2.
