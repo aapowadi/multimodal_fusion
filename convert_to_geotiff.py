@@ -4,7 +4,8 @@ import rioxarray
 import rasterio
 from datetime import datetime, timedelta
 from collections import defaultdict
-
+from rasterio.transform import from_bounds
+import pdb
 def preprocess_weather_to_weekly_geotiffs(sentinel1_dir, weather_dir, output_dir):
     """
     Convert weather NetCDF files to weekly mean GeoTIFFs for April to September,
@@ -62,7 +63,15 @@ def preprocess_weather_to_weekly_geotiffs(sentinel1_dir, weather_dir, output_dir
             output_path = os.path.join(output_dir, f'{date_str}.tif')
             data = mean_da.values  # Shape: (7, height, width)
             crs = mean_da.rio.crs
-            transform = mean_da.rio.transform()
+            height, width = mean_da.shape[1], mean_da.shape[2]
+
+            # Extract coordinates (assuming 'lon' and 'lat' are the coordinate names)
+            lon = mean_da.coords['x'].values
+            lat = mean_da.coords['y'].values
+            # Calculate the transform based on the bounds of the coordinates
+            west, east = lon.min(), lon.max()
+            south, north = lat.min(), lat.max()
+            transform = from_bounds(west, south, east, north, width, height)
             height, width = mean_da.shape[1], mean_da.shape[2]
             variables = ['dayl', 'prcp', 'srad', 'swe', 'tmax', 'tmin', 'vp']
 
