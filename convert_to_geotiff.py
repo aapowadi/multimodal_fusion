@@ -1,97 +1,37 @@
-import os
 import xarray as xr
 import rioxarray
-import rasterio
-from datetime import datetime, timedelta
-from collections import defaultdict
-from rasterio.transform import from_bounds
-import pdb
-def preprocess_weather_to_weekly_geotiffs(sentinel1_dir, weather_dir, output_dir):
+import os
+ 
+def convert_weather_to_geotiff(weather_dir, output_dir):
     """
-    Convert weather NetCDF files to weekly mean GeoTIFFs for April to September,
-    with each GeoTIFF named by week_start_date and stacking variables as channels.
+    Convert weather NetCDF files to GeoTIFFs for each variable and time step within April to September.
 
     Args:
-        sentinel1_dir (str): Directory containing Sentinel-1 folders (YYYY-MM-DD).
         weather_dir (str): Directory containing IA_year.nc files.
-        output_dir (str): Directory to save the weekly mean GeoTIFFs.
+        output_dir (str): Directory to save the GeoTIFFs, organized by variable.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    for year_file in os.listdir(weather_dir):
 
-    # Get all week_start_dates from Sentinel-1, filtered for April to September
-    week_start_dates = [
-        d for d in os.listdir(sentinel1_dir)
-        if os.path.isdir(os.path.join(sentinel1_dir, d))
-    ]
-    dates_by_year = defaultdict(list)
-    for date_str in week_start_dates:
-        try:
-            date = datetime.strptime(date_str, '%Y-%m-%d')
-            month = date.month
-            day = date.day
-            if (month == 4 and day >= 1) or (4 < month < 9) or (month == 9 and day <= 30):
-                year = date.year
-                dates_by_year[year].append(date_str)
-        except ValueError:
-            continue
+        if year_file.endswith('.nc'):
+            year = year_file.split('_')[1].split('.')[0]  # e.g., '2023' from 'IA_2023.nc'
+            ds = xr.open_dataset(os.path.join(weather_dir, year_file))
+            # Set CRS if not already set
+            if not ds.rio.crs:
+                ds = ds.rio.write_crs("epsg:4326")
+            # Select time slice from April 1 to September 30
+            start_date = f'{year}-04-01'
+            end_date = f'{year}-09-30'
+            ds_subset = ds.sel(time=slice(start_date, end_date))
+            for time in ds_subset['time']:
+                date_str = str(time.values)[:10]  # YYYY-MM-DD
+                for var in ['dayl', 'prcp', 'srad', 'swe', 'tmax', 'tmin', 'vp']:
+                    da = ds_subset[var].sel(time=time)
+                    var_dir = os.path.join(output_dir, var)
+                    os.makedirs(var_dir, exist_ok=True)
+                    output_path = os.path.join(var_dir, f'{date_str}.tif')
+                    da.rio.to_raster(output_path)
+                    print(f"Saved {output_path}")
 
-    # Process each year
-    for year, dates in dates_by_year.items():
-        nc_path = os.path.join(weather_dir, f'IA_{year}.nc')
-        if not os.path.exists(nc_path):
-            print(f"Warning: No weather file for year {year}")
-            continue
-        ds = xr.open_dataset(nc_path)
-        # Ensure CRS is set
-        if not ds.rio.crs:
-            ds = ds.rio.write_crs("epsg:4326")
-
-        # Process each week
-        for date_str in dates:
-            start_date = datetime.strptime(date_str, '%Y-%m-%d')
-            end_date = start_date + timedelta(days=6)
-            # Select data for the week
-            ds_week = ds.sel(time=slice(start_date, end_date))
-            if len(ds_week['time']) == 0:
-                print(f"No data for week starting {date_str}")
-                continue
-            # Compute mean over time for all variables
-            mean_ds = ds_week.mean(dim='time')
-            variables = ['dayl', 'prcp', 'srad', 'swe', 'tmax', 'tmin', 'vp']
-            mean_da = mean_ds[variables].to_array(dim='variable')
-            # Write to GeoTIFF
-            output_path = os.path.join(output_dir, f'{date_str}.tif')
-            data = mean_da.values  # Shape: (7, height, width)
-            crs = mean_da.rio.crs
-            height, width = mean_da.shape[1], mean_da.shape[2]
-
-            # Extract coordinates (assuming 'lon' and 'lat' are the coordinate names)
-            lon = mean_da.coords['x'].values
-            lat = mean_da.coords['y'].values
-            # Calculate the transform based on the bounds of the coordinates
-            west, east = lon.min(), lon.max()
-            south, north = lat.min(), lat.max()
-            transform = from_bounds(west, south, east, north, width, height)
-            height, width = mean_da.shape[1], mean_da.shape[2]
-            variables = ['dayl', 'prcp', 'srad', 'swe', 'tmax', 'tmin', 'vp']
-
-            profile = {
-                'driver': 'GTiff',
-                'height': height,
-                'width': width,
-                'count': len(variables),
-                'dtype': data.dtype,
-                'crs': crs,
-                'transform': transform,
-                'descriptions': variables
-            }
-
-            with rasterio.open(output_path, 'w', **profile) as dst:
-                dst.write(data)
-            print(f"Saved weekly mean GeoTIFF for {date_str}")
-
-# Example usage
-sentinel1_dir = '/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1'
 weather_dir = '/work/mech-ai-scratch/rtali/AI_READY_IOWA/WEATHER'
 output_dir = '/work/mech-ai-scratch/rtali/AI_READY_IOWA/WEATHER_TIFFS'
-preprocess_weather_to_weekly_geotiffs(sentinel1_dir, weather_dir, output_dir)
+convert_weather_to_geotiff(weather_dir, output_dir)
