@@ -1,0 +1,1 @@
+aws: Soil water storage estimates are typically expressed in units of length, like centimeters (cm) or millimeters (mm), representing the equivalent depth of water contained within a soil layer. 

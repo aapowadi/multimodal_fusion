@@ -45,6 +45,7 @@ if args.m =='soil':
             pixels = data.flatten()  # Convert 2D array to 1D
             # Filter out negative values
             valid_pixels = pixels[pixels >= 0]
+            valid_pixels = valid_pixels[valid_pixels < 9999]
             if valid_pixels.size > 0:
                 # Update statistics with this image's pixel values
                 min_val = min(min_val, valid_pixels.min())
