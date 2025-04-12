@@ -5,6 +5,7 @@ import numpy as np
 import csv
 import argparse
 import matplotlib.pyplot as plt
+
 # Set up argument parser
 parser = argparse.ArgumentParser(description='Calculate statistics for Sentinel-2 bands across multiple folders.')
 parser.add_argument('-p', type=str, help='Path to the root folder containing subfolders with Sentinel-2 band files')
