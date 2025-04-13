@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 import numpy as np
 import torchvision.transforms as transforms
 import pandas as pd
+import os
+from datetime import datetime
+import time
 
 
 def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', modis_path='modis_statistics.csv'):
@@ -70,6 +73,8 @@ if __name__ == "__main__":
     sentinel2_dir = 'path/to/sentinel2'
     modis_dir = 'path/to/modis'
 
+    start_time = time.time()
+
     # Define your dataset
     dataset = MultiModalDataset(
         sentinel1_dir='/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1',
@@ -82,12 +87,19 @@ if __name__ == "__main__":
     # Create DataLoader
     loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
+    dload_time = time.time() - start_time
+    print(f"Data loading time: {dload_time:.2f} seconds")
+
     # Collect 5000 samples
     sampled_data = []
     for i, sample in enumerate(loader):
         sampled_data.append(sample)
         if i == 4999:
             break
+
+    # Sampling Time
+    sampling_time = time.time() - dload_time
+    print(f"Sampling time: {sampling_time:.2f} seconds")
 
     """
     Convert to tensors
@@ -129,3 +141,10 @@ if __name__ == "__main__":
     # Save the tensor to a file
     np.save('./models/u_net_data.npy', u_net)
     print("Data saved to ./models/u_net_data.npy")
+
+    # Print the shape of the tensor
+    print(f"Tensor shape: {u_net.shape}")
+
+    # Print the time taken for the entire process
+    total_time = time.time() - start_time
+    print(f"Total time: {total_time:.2f} seconds")

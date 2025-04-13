@@ -12,7 +12,7 @@ from glob import glob
 
 
 class MultiModalDataset(Dataset):
-    def __init__(self, sentinel1_dir, sentinel2_dir, modis_dir, crop_dir, soil_dir, weather_dir, transform=None):
+    def __init__(self, sentinel1_dir, sentinel2_dir, modis_dir, transform=None):
         """
         Initialize the dataset using Sentinel-1 folder dates (YYYY-MM-DD) and random 16x16 patches
         from a 1 mile x 1 mile area in WGS84 degrees.
@@ -29,9 +29,6 @@ class MultiModalDataset(Dataset):
         self.sentinel1_dir = sentinel1_dir
         self.sentinel2_dir = sentinel2_dir
         self.modis_dir = modis_dir
-        self.cdl_dir = crop_dir
-        self.soil_dir = soil_dir
-        self.weather_dir = weather_dir
         self.transform = transform
         self.patch_size = 16*4  # 16x16 patch size
         self.delta_lat = 0.01446*4  # 1 mile in latitude degrees (approx.)

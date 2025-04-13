@@ -5,6 +5,7 @@ This repository contains code for training a U-Net model to impute missing pixel
 
 1. Cropped Images (MODIS, Sent-1 and Sent-2) of size 64x64 available in a directory.
 2. Install pytorch lightning and other dependencies.
+3. Run ```python3 imputation/crop_geotiffs.py``` to prepare data for the UNet model.
 
 ## Training the U-Net model for imputation
 1. Run the following command to train the U-Net model for imputation:
