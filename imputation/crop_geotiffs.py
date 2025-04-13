@@ -6,12 +6,56 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 import torchvision.transforms as transforms
+import pandas as pd
 
 
-def normalize_channel(channel, percentile=2):
-    vmin = np.percentile(channel, percentile)
-    vmax = np.percentile(channel, 100 - percentile)
-    channel = (channel - vmin) / (vmax - vmin)
+def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', modis_path='modis_statistics.csv'):
+    try:
+
+        s1_stats = pd.read_csv(s1_path)
+        s2_stats = pd.read_csv(s2_path)
+        modis_stats = pd.read_csv(modis_path)
+
+    except FileNotFoundError as e:
+
+        print(f"Error: Could not find one of the CSV files: {e}")
+        return None, None, None
+
+    # Convert to dictionaries for easy lookup
+    s1_min_max = {row['Band']: (row['Min'], row['Max'])
+                  for _, row in s1_stats.iterrows()}
+    s2_min_max = {row['Band']: (row['Min'], row['Max'])
+                  for _, row in s2_stats.iterrows()}
+    modis_min_max = {row['Band']: (row['Min'], row['Max'])
+                     for _, row in modis_stats.iterrows()}
+
+    return s1_min_max, s2_min_max, modis_min_max
+
+
+def normalize_channel(channel, band_idx, modality_name, s1_stats_path='s1_statistics.csv', s2_stats_path='s2_statistics.csv', modis_stats_path='modis_statistics.csv'):
+    s1_min_max, s2_min_max, modis_min_max = load_statistics(
+        s1_stats_path, s2_stats_path, modis_stats_path)
+    if modality_name == 'Sentinel-1':
+        band_key = list(s1_min_max.keys())[band_idx] if band_idx < len(
+            s1_min_max) else str(band_idx)
+        vmin, vmax = s1_min_max.get(
+            band_key, (channel.min(), channel.max()))
+    elif modality_name == 'Sentinel-2':
+        band_key = list(s2_min_max.keys())[band_idx] if band_idx < len(
+            s2_min_max) else str(band_idx)
+        vmin, vmax = s2_min_max.get(
+            band_key, (channel.min(), channel.max()))
+    elif modality_name == 'MODIS':
+        band_key = list(modis_min_max.keys())[band_idx] if band_idx < len(
+            modis_min_max) else str(band_idx)
+        vmin, vmax = modis_min_max.get(
+            band_key, (channel.min(), channel.max()))
+    else:
+        # For other modalities, use array min/max as fallback
+        vmin, vmax = channel.min(), channel.max()
+
+    channel = (channel - vmin) / \
+        (vmax - vmin) if vmax != vmin else channel - vmin
     channel = np.clip(channel, 0, 1)
     return channel
 
@@ -83,5 +127,5 @@ if __name__ == "__main__":
         u_net[i] = combined
 
     # Save the tensor to a file
-    np.save('u_net_data.npy', u_net)
-    print("Data saved to u_net_data.npy")
+    np.save('./models/u_net_data.npy', u_net)
+    print("Data saved to ./models/u_net_data.npy")
