@@ -12,17 +12,17 @@ from datetime import datetime
 import time
 
 
-def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', modis_path='modis_statistics.csv'):
+def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', modis_path='modis_statistics.csv',
+                    soil_path='soil_statistics.csv', weather_path='weather_statistics.csv'):
     try:
-
-        s1_stats = pd.read_csv(s1_path)
-        s2_stats = pd.read_csv(s2_path)
-        modis_stats = pd.read_csv(modis_path)
-
+        s1_stats = pd.read_csv('statistics/' + s1_path)
+        s2_stats = pd.read_csv('statistics/' + s2_path)
+        modis_stats = pd.read_csv('statistics/' + modis_path)
+        soil_stats = pd.read_csv('statistics/' + soil_path)
+        weather_stats = pd.read_csv('statistics/' + weather_path)
     except FileNotFoundError as e:
-
         print(f"Error: Could not find one of the CSV files: {e}")
-        return None, None, None
+        return None, None, None, None, None
 
     # Convert to dictionaries for easy lookup
     s1_min_max = {row['Band']: (row['Min'], row['Max'])
@@ -31,120 +31,178 @@ def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', mo
                   for _, row in s2_stats.iterrows()}
     modis_min_max = {row['Band']: (row['Min'], row['Max'])
                      for _, row in modis_stats.iterrows()}
+    soil_min_max = {row['Band']: (row['Min'], row['Max'])
+                    for _, row in soil_stats.iterrows()}
+    weather_min_max = {row['Band']: (row['Min'], row['Max'])
+                       for _, row in weather_stats.iterrows()}
 
-    return s1_min_max, s2_min_max, modis_min_max
+    return s1_min_max, s2_min_max, modis_min_max, soil_min_max, weather_min_max
 
 
-def normalize_channel(channel, band_idx, modality_name, s1_stats_path='s1_statistics.csv', s2_stats_path='s2_statistics.csv', modis_stats_path='modis_statistics.csv'):
-    s1_min_max, s2_min_max, modis_min_max = load_statistics(
-        s1_stats_path, s2_stats_path, modis_stats_path)
-    if modality_name == 'Sentinel-1':
-        band_key = list(s1_min_max.keys())[band_idx] if band_idx < len(
-            s1_min_max) else str(band_idx)
-        vmin, vmax = s1_min_max.get(
-            band_key, (channel.min(), channel.max()))
-    elif modality_name == 'Sentinel-2':
-        band_key = list(s2_min_max.keys())[band_idx] if band_idx < len(
-            s2_min_max) else str(band_idx)
-        vmin, vmax = s2_min_max.get(
-            band_key, (channel.min(), channel.max()))
-    elif modality_name == 'MODIS':
-        band_key = list(modis_min_max.keys())[band_idx] if band_idx < len(
-            modis_min_max) else str(band_idx)
-        vmin, vmax = modis_min_max.get(
-            band_key, (channel.min(), channel.max()))
+def full_normalization(dataset, sample_idx=0):
+
+    # Bring Normalization to the dataset from display_samples.py
+    # Load statistics
+    s1_min_max, s2_min_max, modis_min_max, soil_min_max, weather_min_max = load_statistics()
+
+    if s1_min_max is None:
+        print("Using percentile-based normalization as fallback.")
+        # Define fallback percentile-based normalization
+
+        def normalize_channel(channel, percentile=2):
+            vmin = np.percentile(channel, percentile)
+            vmax = np.percentile(channel, 100 - percentile)
+            channel = (channel - vmin) / \
+                (vmax - vmin) if vmax != vmin else channel - vmin
+            channel = np.clip(channel, 0, 1)
+            return channel
     else:
-        # For other modalities, use array min/max as fallback
-        vmin, vmax = channel.min(), channel.max()
+        # Define min-max normalization using CSV statistics
+        def normalize_channel(channel, band_idx, modality_name):
+            if modality_name == 'Sentinel-1':
+                band_key = list(s1_min_max.keys())[band_idx] if band_idx < len(
+                    s1_min_max) else str(band_idx)
+                vmin, vmax = s1_min_max.get(
+                    band_key, (channel.min(), channel.max()))
+            elif modality_name == 'Sentinel-2':
+                band_key = list(s2_min_max.keys())[band_idx] if band_idx < len(
+                    s2_min_max) else str(band_idx)
+                vmin, vmax = s2_min_max.get(
+                    band_key, (channel.min(), channel.max()))
+            elif modality_name == 'MODIS':
+                band_key = list(modis_min_max.keys())[band_idx] if band_idx < len(
+                    modis_min_max) else str(band_idx)
+                vmin, vmax = modis_min_max.get(
+                    band_key, (channel.min(), channel.max()))
+            else:
+                # Remaining modality is CDL, which has min value = 0 and max value of 254
+                vmin, vmax = 0.0, 254.0
 
-    channel = (channel - vmin) / \
-        (vmax - vmin) if vmax != vmin else channel - vmin
-    channel = np.clip(channel, 0, 1)
-    return channel
+            channel = (channel - vmin) / \
+                (vmax - vmin) if vmax != vmin else channel - vmin
+            channel = np.clip(channel, 0, 1)
+            return channel
+
+    # Normalize each channel
+    modalities, label = dataset[sample_idx]
+    modality_names = ['Sentinel-1', 'Sentinel-2', 'MODIS']
+
+    for i, (modality, name) in enumerate(zip(modalities, modality_names)):
+
+        if name == 'Sentinel-2':
+            r = normalize_channel(
+                modality[3].numpy(), band_idx=3, modality_name='Sentinel-2')
+            g = normalize_channel(
+                modality[2].numpy(), band_idx=2, modality_name='Sentinel-2')
+            b = normalize_channel(
+                modality[1].numpy(), band_idx=1, modality_name='Sentinel-2')
+            rgb = np.stack([r, g, b], axis=-1)
+
+        elif name == 'MODIS':
+
+            r = normalize_channel(
+                modality[0].numpy(), band_idx=0, modality_name='MODIS')
+            g = normalize_channel(
+                modality[3].numpy(), band_idx=3, modality_name='MODIS')
+            b = normalize_channel(
+                modality[2].numpy(), band_idx=2, modality_name='MODIS')
+            rgb = np.stack([r, g, b], axis=-1)
+
+        else:
+            channel = normalize_channel(
+                modality[0].numpy(), band_idx=0, modality_name=name)
 
 
 if __name__ == "__main__":
-    # Set random seed for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
 
-    # Define the paths to your data directories
-    sentinel1_dir = 'path/to/sentinel1'
-    sentinel2_dir = 'path/to/sentinel2'
-    modis_dir = 'path/to/modis'
+    # Set random seed for reproducibility
+    np.random.seed(42)
 
     start_time = time.time()
 
-    # Define your dataset
-    dataset = MultiModalDataset(
-        sentinel1_dir='/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1',
-        sentinel2_dir='/work/mech-ai-scratch/rtali/gis-sentinel2/final_s2_v3',
-        modis_dir='/work/mech-ai-scratch/rtali/gis-modis/modis',
-        # Adjust mean/std per channel if needed
-        transform=transforms.Normalize(mean=[0.5], std=[0.5])
-    )
+    '''
+    We want to extract 5000 samples from the dataset. Prepare three numpy tensors. One for each modality.
+    The first tensor will be for MODIS, the second for Sentinel-1, and the third for Sentinel-2.
+    The dimensions of the tensors will be (5000, 7, 64, 64) for MODIS, (5000, 2, 64, 64) for Sentinel-1,
+    and (5000, 12, 64, 64) for Sentinel-2.
+    The first dimension is the number of samples, the second dimension is the number of channels,
+    and the last two dimensions are the height and width of the image.
+    The images will be 64x64 pixels in size.
+    The channels for MODIS are 7, for Sentinel-1 are 2, and for Sentinel-2 are 12.
+    '''
 
-    # Create DataLoader
-    loader = DataLoader(dataset, batch_size=1, shuffle=True)
+    NSAMPLES = 5000
+    DIMX = 64
+    DIMY = 64
+    MODIS_DIMS = 7
+    SENTINEL2_DIMS = 12
+    SENTINEL1_DIMS = 2
 
-    dload_time = time.time() - start_time
-    print(f"Data loading time: {dload_time:.2f} seconds")
+    # Initialize a numpy tensor to store the samples. float32 for full precision
+    unetX = np.zeros((NSAMPLES, MODIS_DIMS, DIMX, DIMY), dtype=np.float32)
 
-    # Collect 5000 samples
-    sampled_data = []
-    for i, sample in enumerate(loader):
-        sampled_data.append(sample)
-        if i == 4999:
-            break
+    unetYS1 = np.zeros(
+        (NSAMPLES, SENTINEL1_DIMS, DIMX, DIMY), dtype=np.float32)
 
-    # Sampling Time
-    sampling_time = time.time() - dload_time
-    print(f"Sampling time: {sampling_time:.2f} seconds")
+    unetYS2 = np.zeros(
+        (NSAMPLES, SENTINEL2_DIMS, DIMX, DIMY), dtype=np.float32)
 
-    """
-    Convert to tensors
-    """
+    for i in range(NSAMPLES):
+        # Load the dataset
+        dataset = MultiModalDataset(
+            sentinel1_dir='/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1',
+            sentinel2_dir='/work/mech-ai-scratch/rtali/gis-sentinel2/final_s2_v3',
+            modis_dir='/work/mech-ai-scratch/rtali/gis-modis/modis',
+            crop_dir='/work/mech-ai-scratch/rtali/gis-CDL/final_CDL',
+            soil_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/SOIL/CRSchange',
+            weather_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/WEATHER_TIFFS'
+        )
 
-    # Init tensor of Zeros
-    tensor_size = 64
-    u_net = np.zeros((5000, 7, tensor_size, tensor_size))
+        # Get channel counts
+        num_channels_list = [
+            len(dataset.s1_bands),      # 2 (Sentinel-1)
+            len(dataset.s2_bands),      # 12 (Sentinel-2)
+            len(dataset.modis_bands),   # 7 (MODIS)
+            len(dataset.cdl_bands),     # Update with actual count
+            len(dataset.soil_bands),     # 6 (Soil)
+            len(dataset.weather_bands)   # 7 (Weather)
+        ]
 
-    # Fill the tensor with the data
+        print(f"Number of channels for each modality: {num_channels_list}")
 
-    # Extract 2 bands of Sentinel-1
-    for i, sample in enumerate(sampled_data):
-        # Extract Sentinel-1 bands
-        s1 = []
-        s2 = []
-        modis = []
+        # Normalize the sample for MODIS
+        X = full_normalization(dataset, 0)
 
-        for band in sample.shape[0]:
-            s1.append(normalize_channel(sample[band].numpy()))
+        # Normalize the sample for Sentinel-1
+        YS1 = full_normalization(dataset, 1)
 
-        for band in sample.shape[1]:
-            s2.append(normalize_channel(sample[band].numpy()))
+        # Normalize the sample for Sentinel-2
+        YS2 = full_normalization(dataset, 2)
 
-        for band in sample.shape[2]:
-            modis.append(normalize_channel(sample[band].numpy()))
+        # Write the samples to the tensors
+        unetX[i] = X
+        unetYS1[i] = YS1
+        unetYS2[i] = YS2
 
-        # Stack the bands
-        s1_bands = np.stack(s1, axis=0)  # (2, 64, 64)
-        s2_bands = np.stack(s2, axis=0)  # (13, 64, 64)
-        modis_bands = np.stack(modis, axis=0)  # (7, 64, 64)
+    print("Finished writing samples to tensors.")
+    print(f"Time taken: {time.time() - start_time} seconds")
 
-        # Create a tensor by stacking on the first dimension
-        combined = np.concatenate([s1_bands, s2_bands, modis_bands], axis=0)
+    # Check the shapes of the tensors
+    print(f"unetX shape: {unetX.shape}")
+    print(f"unetYS1 shape: {unetYS1.shape}")
+    print(f"unetYS2 shape: {unetYS2.shape}")
 
-        # Fill the u_net tensor
-        u_net[i] = combined
+    print("Saving tensors to disk...")
+    start_time = time.time()
 
-    # Save the tensor to a file
-    np.save('./models/u_net_data.npy', u_net)
-    print("Data saved to ./models/u_net_data.npy")
+    # Save the tensors to disk as .npy files
+    np.save('./models/unetX.npy', unetX)
+    np.save('./models/unetYS1.npy', unetYS1)
+    np.save('./models/unetYS2.npy', unetYS2)
 
-    # Print the shape of the tensor
-    print(f"Tensor shape: {u_net.shape}")
-
-    # Print the time taken for the entire process
-    total_time = time.time() - start_time
-    print(f"Total time: {total_time:.2f} seconds")
+    print("Saved tensors to disk.")
+    print(f"Time taken to save tensors: {time.time() - start_time} seconds")
+    print("\n======================================")
+    print("All done!")
+    print("Exiting...")
+    print("======================================")

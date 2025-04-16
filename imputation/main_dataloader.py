@@ -9,10 +9,11 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as F
 from glob import glob
+import pandas as pd
 
 
 class MultiModalDataset(Dataset):
-    def __init__(self, sentinel1_dir, sentinel2_dir, modis_dir, transform=None):
+    def __init__(self, sentinel1_dir, sentinel2_dir, modis_dir, crop_dir, soil_dir, weather_dir, transform=None):
         """
         Initialize the dataset using Sentinel-1 folder dates (YYYY-MM-DD) and random 16x16 patches
         from a 1 mile x 1 mile area in WGS84 degrees.
@@ -29,6 +30,9 @@ class MultiModalDataset(Dataset):
         self.sentinel1_dir = sentinel1_dir
         self.sentinel2_dir = sentinel2_dir
         self.modis_dir = modis_dir
+        self.cdl_dir = crop_dir
+        self.soil_dir = soil_dir
+        self.weather_dir = weather_dir
         self.transform = transform
         self.patch_size = 16*4  # 16x16 patch size
         self.delta_lat = 0.01446*4  # 1 mile in latitude degrees (approx.)
@@ -49,7 +53,12 @@ class MultiModalDataset(Dataset):
                          'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
         self.modis_bands = ['Band1', 'Band2', 'Band3',
                             'Band4', 'Band5', 'Band6', 'Band7']  # 7 bands
-
+        self.weather_bands = ['dayl', 'prcp', 'srad',
+                              'swe', 'tmax', 'tmin', 'vp']  # 7 variables
+        # Crop Data Layer: 120 classes representing land cover uses including different crops like 'Maize', 'Soy', etc.
+        self.cdl_bands = ['Band_1']
+        self.soil_bands = ['aws100', 'aws150', 'aws999', 'nccpi3all', 'nccpi3corn',
+                           'rootznaws', 'soc150', 'soc999', 'pctearthmc']  # 6 variables
         # Get spatial bounds from a sample Sentinel-1 GeoTIFF
         sample_s1_path = os.path.join(
             sentinel1_dir, self.week_start_dates[0], '4326_vv.tif')
@@ -58,6 +67,7 @@ class MultiModalDataset(Dataset):
             self.transform_geo = src.transform  # Geotransform to convert degrees to pixels
             self.width, self.height = src.width, src.height
 
+    
     def _is_in_april_to_september(self, date_str):
         """Check if date_str (YYYY-MM-DD) is between April 1st and September 30th."""
         try:
@@ -68,9 +78,8 @@ class MultiModalDataset(Dataset):
         except ValueError:
             return False
 
-    def _load_and_crop_single_band(self, path, bbox):
+    def _load_and_crop_single_band(self, path, bbox, cdl=True):
         """Load and crop a single-band GeoTIFF using coordinate bounds, resize to 16x16."""
-
         with rasterio.open(path) as src:
             window = rasterio.windows.from_bounds(
                 *bbox, transform=src.transform)
@@ -78,13 +87,16 @@ class MultiModalDataset(Dataset):
                             fill_value=np.nan)  # Handle out-of-bounds
             data_tensor = torch.from_numpy(
                 data).float().unsqueeze(0)  # (1, height, width)
-            resized = F.resize(
-                data_tensor, [self.patch_size, self.patch_size], interpolation=F.InterpolationMode.BILINEAR)
+            if cdl == True:
+                resized = F.resize(data_tensor, [
+                                   self.patch_size, self.patch_size], interpolation=F.InterpolationMode.NEAREST_EXACT)
+            else:
+                resized = F.resize(data_tensor, [
+                                   self.patch_size, self.patch_size], interpolation=F.InterpolationMode.BILINEAR)
             return resized.squeeze(0)  # (16, 16)
 
     def _load_and_crop_multi_band(self, path, bbox):
         """Load and crop a multi-band GeoTIFF using coordinate bounds, resize to 16x16."""
-
         with rasterio.open(path) as src:
             window = rasterio.windows.from_bounds(
                 *bbox, transform=src.transform)
@@ -92,8 +104,8 @@ class MultiModalDataset(Dataset):
                             fill_value=np.nan)  # (bands, height, width)
             data_tensor = torch.from_numpy(
                 data).float()  # (bands, height, width)
-            resized = F.resize(
-                data_tensor, [self.patch_size, self.patch_size], interpolation=F.InterpolationMode.BILINEAR)
+            resized = F.resize(data_tensor, [
+                               self.patch_size, self.patch_size], interpolation=F.InterpolationMode.BILINEAR)
             return resized  # (bands, 16, 16)
 
     def _random_patch_coords(self):
@@ -162,11 +174,54 @@ class MultiModalDataset(Dataset):
             modis_patches.append(patch)
         modis_tensor = torch.stack(modis_patches, dim=0)  # (7, 16, 16)
 
+        # Crop (single-band)
+        crop_path = os.path.join(self.cdl_dir, f'{year}_WGS84.tif')
+        cdl_tensor = self._load_and_crop_single_band(
+            crop_path, bbox).unsqueeze(0)  # (1, 16, 16)
+
+        # 4. soil data (all bands)
+        soil_patches = []
+        for band in self.soil_bands:
+            path = os.path.join(
+                self.soil_dir, f'merged_max_{band}_resampled_new.tif')
+            patch = self._load_and_crop_single_band(path, bbox)
+            soil_patches.append(patch)
+        soil_tensor = torch.stack(soil_patches, dim=0)  # (6, 16, 16)
+
+        # Weather data (separate files)
+        # cropped_ds = ds.sel(
+        # lon=slice(bbox['left'], bbox['right']),
+        # lat=slice(bbox['bottom'], bbox['top']))
+        weather_patches = []
+        date = datetime.strptime(f'{week_start_date}', '%Y-%m-%d')
+        doy = date.timetuple().tm_yday
+        for band in self.weather_bands:
+            week_stack = []
+            for i in range(doy, doy+7):
+                date_s = datetime.strptime(f'{year}-{i}', '%Y-%j')
+                year = date_s.strftime("%Y")  # Gets "2023"
+                month = date_s.strftime("%m")  # Gets "01"
+                day = date_s.strftime("%d")   # Gets "05"
+                date_str = f"{year}-{month}-{day}"
+                path = os.path.join(self.weather_dir, band, f'{date_str}.tif')
+                patch = self._load_and_crop_single_band(path, bbox)
+                week_stack.append(patch)
+            # Average over 7 days of all non-NaN values
+            week_avg = torch.nanmean(torch.stack(week_stack, dim=0), dim=0)
+            weather_patches.append(week_avg)
+        weather_tensor = torch.stack(weather_patches, dim=0)  # (7, 16, 16)
+
         # Stack modalities into a list (variable channels per modality)
-        modalities = [s1_tensor, s2_tensor, modis_tensor]
+        modalities = [s1_tensor, s2_tensor, modis_tensor,
+                      cdl_tensor, soil_tensor, weather_tensor]
         # Shapes: [(2, 16, 16), (13, 16, 16), (7, 16, 16), (N_crop, 16, 16), (6, 16, 16), (7, 16, 16)]
 
         if self.transform:
             modalities = [self.transform(m) for m in modalities]
 
-        return modalities
+        # Dummy label (replace with actual labels if available)
+        label = 0
+
+        return modalities, label
+        
+        
