@@ -13,6 +13,11 @@ from curve_fitting import impute_missing_values
 from numba import njit, prange
 import time
 
+'''
+This function takes all band files for a given year and band, and aggregates them into a single GeoTIFF file.
+Each weekly band file becomes a separate band in the output file.
+'''
+
 
 def aggregate_bands_by_year(sat, yr, band, input_files):
     # Step 1: Read metadata and calculate union bounds
