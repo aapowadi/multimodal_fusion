@@ -11,9 +11,10 @@ from rasterio.transform import from_bounds
 import glob
 from curve_fitting import impute_missing_values
 from numba import njit, prange
+import time
 
 
-def aggregate_bands_by_year(input_files):
+def aggregate_bands_by_year(sat, yr, band, input_files):
     # Step 1: Read metadata and calculate union bounds
     all_bounds = []
     resolutions = []
@@ -81,7 +82,7 @@ def aggregate_bands_by_year(input_files):
         "compress": "lzw"
     }
 
-    with rasterio.open("aligned_union_multiband.tif", "w", **meta) as dst:
+    with rasterio.open(f"./imputation_time_based/images_by_year/{yr}/{sat}/{band}.tif", "w", **meta) as dst:
         for i in range(len(input_files)):
             dst.write(output_array[i], i + 1)
 
@@ -174,10 +175,22 @@ if __name__ == "__main__":
         print(f"Processing year {yr}")
         # For each year, process the files for each band
         for s1_band_files in s1_files[str(yr)]:
-            aggregate_bands_by_year(s1_band_files)
+            aggregate_bands_by_year('S1', yr, 'vv', s1_band_files[0])
+            aggregate_bands_by_year('S1', yr, 'vh', s1_band_files[1])
 
         for s2_band_files in s2_files[str(yr)]:
-            aggregate_bands_by_year(s2_band_files)
+            aggregate_bands_by_year('S2', yr, 'B01', s1_band_files[0])
+            aggregate_bands_by_year('S2', yr, 'B02', s1_band_files[1])
+            aggregate_bands_by_year('S2', yr, 'B03', s1_band_files[2])
+            aggregate_bands_by_year('S2', yr, 'B04', s1_band_files[3])
+            aggregate_bands_by_year('S2', yr, 'B05', s1_band_files[4])
+            aggregate_bands_by_year('S2', yr, 'B06', s1_band_files[5])
+            aggregate_bands_by_year('S2', yr, 'B07', s1_band_files[6])
+            aggregate_bands_by_year('S2', yr, 'B08', s1_band_files[7])
+            aggregate_bands_by_year('S2', yr, 'B8A', s1_band_files[8])
+            aggregate_bands_by_year('S2', yr, 'B09', s1_band_files[9])
+            aggregate_bands_by_year('S2', yr, 'B11', s1_band_files[10])
+            aggregate_bands_by_year('S2', yr, 'B12', s1_band_files[11])
 
     # perform time based imputation
     """
@@ -190,9 +203,12 @@ if __name__ == "__main__":
     for yr in years:
         print(f"Imputing year {yr}")
 
+        # Process Sentinel-1 bands
         for s1_band in s1_bands:
 
-            with rasterio.open(f"./imputation_time_based/images_by_year/{yr}/aligned_union_multiband_{s1_band}.tif") as src:
+            start_time = time.time()
+
+            with rasterio.open(f"./imputation_time_based/images_by_year/{yr}/S1/{s1_band}.tif") as src:
                 data = src.read()
                 transform = src.transform
                 crs = src.crs
@@ -207,7 +223,7 @@ if __name__ == "__main__":
             parallel_impute(data, imputed_data)
 
             # Save the imputed data to a new GeoTIFF file
-            output_path = f"./imputation_time_based/images_by_year/{yr}/{s1_band}_imputed.tif"
+            output_path = f"./imputation_time_based/images_by_year/{yr}/S1/4326_{s1_band}.tif"
             with rasterio.open(output_path, "w", **meta) as dst:
                 for i in range(data.shape[0]):
                     dst.write(imputed_data[i], i + 1)
@@ -216,8 +232,16 @@ if __name__ == "__main__":
                 dst.nodata = np.nan
             print(f"Saved imputed {s1_band} image for year {yr}")
 
+            end_time = time.time()
+            print(
+                f"Time taken for imputation of S1 : {s1_band} in year {yr}: {end_time - start_time} seconds")
+
+        # Process Sentinel-2 bands
         for s2_band in s2_bands:
-            with rasterio.open(f"./imputation_time_based/images_by_year/{yr}/aligned_union_multiband_{s2_band}.tif") as src:
+
+            start_time = time.time()
+
+            with rasterio.open(f"./imputation_time_based/images_by_year/{yr}/S2/{s2_band}.tif") as src:
                 data = src.read()
                 transform = src.transform
                 crs = src.crs
@@ -232,7 +256,7 @@ if __name__ == "__main__":
             parallel_impute(data, imputed_data)
 
             # Save the imputed data to a new GeoTIFF file
-            output_path = f"./imputation_time_based/images_by_year/{yr}/{s2_band}_imputed.tif"
+            output_path = f"./imputation_time_based/images_by_year/{yr}/S2/4326_{s2_band}.tif"
             with rasterio.open(output_path, "w", **meta) as dst:
                 for i in range(data.shape[0]):
                     dst.write(imputed_data[i], i + 1)
@@ -240,5 +264,13 @@ if __name__ == "__main__":
                 dst.crs = crs
                 dst.nodata = np.nan
             print(f"Saved imputed {s2_band} image for year {yr}")
+
+            end_time = time.time()
+            print(
+                f"Time taken for imputation of S2 : {s2_band} in year {yr}: {end_time - start_time} seconds")
+
+        # Finish processing for the year
         print(f"Finished imputing year {yr}")
+
+    # Final message - all years processed successfully
     print("All years processed successfully.")
