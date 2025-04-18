@@ -5,6 +5,14 @@ import xarray as xr
 import numpy as np
 import rasterio
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+from datetime import datetime
+import pandas as pd
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class MultiModalDataset(Dataset):
     def __init__(self, sentinel1_dir, sentinel2_dir, modis_dir, crop_dir, soil_dir, weather_dir, transform=None):
@@ -102,6 +110,7 @@ class MultiModalDataset(Dataset):
         # Sentinel-1
         s1_folder = os.path.join(self.sentinel1_dir, week_start_date)
         s1_bands = []
+        # print('Loading S1')
         for band in self.s1_bands:
             band_ar = self._load_and_crop_single_band(os.path.join(s1_folder, f'4326_{band}.tif'), bbox, band_name=band, stats=s1_min_max)
             vmin, vmax = s1_min_max[band]
@@ -109,10 +118,11 @@ class MultiModalDataset(Dataset):
             s1_bands.append(channel)
 
         s1_tensor = torch.stack(s1_bands, dim=0)
-
+        # print(f'shape:{s1_tensor.shape}')
         # Sentinel-2
         s2_folder = os.path.join(self.sentinel2_dir, week_start_date)
         s2_bands = []
+        # print('Loading S2')
         for band in self.s2_bands:
             band_ar = self._load_and_crop_single_band(os.path.join(s2_folder, f'4326_{band}.tif'), bbox, band_name=band, stats=s2_min_max)
             vmin, vmax = s2_min_max[band]
@@ -120,10 +130,11 @@ class MultiModalDataset(Dataset):
             s2_bands.append(channel)
 
         s2_tensor = torch.stack(s2_bands, dim=0)
-
+        # print(f'shape:{s2_tensor.shape}')
         # MODIS
         modis_folder = os.path.join(self.modis_dir, week_start_date)
         modis_bands = []
+        # print('Loading Modis')
         for band in self.modis_bands:
             band_ar = self._load_and_crop_single_band(
                 os.path.join(modis_folder, f'4326_{band}.tif'), bbox, band_name=band, stats=modis_min_max)
@@ -131,13 +142,16 @@ class MultiModalDataset(Dataset):
             channel = (band_ar - vmin) / (vmax - vmin + 1e-8)
             modis_bands.append(channel)
         modis_tensor = torch.stack(modis_bands, dim=0)
-
+        # print(f'shape:{modis_tensor.shape}')
         # CDL (used for label)
         crop_path = os.path.join(self.cdl_dir, f'{year}_WGS84.tif')
+        # print('Loading CDL')
         cdl_tensor = self._load_and_crop_single_band(crop_path, bbox, cdl=True, band_name='Band_1')
-        
+        cdl_tensor = torch.reshape(cdl_tensor,(-1,cdl_tensor.shape[0],cdl_tensor.shape[1]))
+        # print(f'shape:{cdl_tensor.shape}')
         # Soil
         soil_bands = []
+        # print('Loading Soil')
         for band in self.soil_bands:
             band_ar = self._load_and_crop_single_band(
                 os.path.join(self.soil_dir, f'merged_max_{band}_resampled_new.tif'), bbox, band_name=band, stats=soil_min_max)
@@ -146,9 +160,10 @@ class MultiModalDataset(Dataset):
             soil_bands.append(channel)
 
         soil_tensor = torch.stack(soil_bands, dim=0)
-
+        # print(f'shape:{soil_tensor.shape}')
         # Weather
         weather_patches = []
+        # print('Loading Weather')
         date = datetime.strptime(week_start_date, '%Y-%m-%d')
         doy = date.timetuple().tm_yday
         for band in self.weather_bands:
@@ -159,7 +174,7 @@ class MultiModalDataset(Dataset):
                 path = os.path.join(self.weather_dir, band, f'{date_str}.tif')
                 try:
                     band_ar = self._load_and_crop_single_band(path, bbox, band_name=band, stats=weather_min_max)
-                    vmin, vmax = soil_min_max[band]
+                    vmin, vmax = weather_min_max[band]
                     channel = (band_ar - vmin) / (vmax - vmin + 1e-8)
                     week_stack.append(channel)
                 except Exception as e:
@@ -173,13 +188,12 @@ class MultiModalDataset(Dataset):
                 week_avg = torch.full((self.patch_size, self.patch_size), dummy_value, dtype=torch.float32)
             weather_patches.append(week_avg)
         weather_tensor = torch.stack(weather_patches, dim=0)
-
+        # print(f'shape:{weather_tensor.shape}')
         s1_tensor = torch.cat((s1_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
         s2_tensor = torch.cat((s2_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
         modis_tensor = torch.cat((modis_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
-        modalities = [s1_tensor, s2_tensor, modis_tensor]
 
-        return modalities
+        return [s1_tensor, s2_tensor, modis_tensor]
 
 
 def load_statistics(s1_path='s1_statistics.csv', s2_path='s2_statistics.csv', modis_path='modis_statistics.csv',

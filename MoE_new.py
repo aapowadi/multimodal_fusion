@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from transformers.optimization import Adafactor
 from torch.optim.lr_scheduler import LambdaLR
 import math
-
+from dataset_contrastive import MultiModalDataset 
+import pdb
 # Configuration
 class Config:
     num_modalities = 3
@@ -200,7 +201,9 @@ class LIMoELightning(pl.LightningModule):
         return self.model(inputs, modality_idx)
 
     def training_step(self, batch, batch_idx):
-        images, labels = batch  # images: list of [batch_size, channels_i, height, width]
+        images = batch
+        # s1,s2,modis = batch  
+        # images = torch.cat((s1,s2,modis),dim=1) # images: list of [batch_size, channels_i, height, width]
         batch_size = images[0].size(0)
         loss = 0.0
         aux_loss = 0.0
@@ -228,7 +231,8 @@ class LIMoELightning(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        images, labels = batch  # images: list of [batch_size, channels_i, height, width]
+        images = batch
+        # images = torch.cat((s1,s2,modis),dim=1) # images: list of [batch_size, channels_i, height, width]
         batch_size = images[0].size(0)
         loss = 0.0
         representations = []
@@ -284,40 +288,52 @@ class SyntheticDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # Generate synthetic data with correct channel counts for each modality
-        self.train_dataset = [
-            (
-                [
-                    # Normalize to [-1, 1] as per LIMoE paper
-                    2 * torch.randn(self.config.batch_size, channels, self.config.image_size, self.config.image_size) - 1
-                    for channels in self.config.channels
-                ],  # List of [batch_size, channels_i, height, width]
-                torch.randint(0, 10, (self.config.batch_size,))
-            )
-            for _ in range(1000)
-        ]
-        self.val_dataset = [
-            (
-                [
-                    2 * torch.randn(self.config.batch_size, channels, self.config.image_size, self.config.image_size) - 1
-                    for channels in self.config.channels
-                ],
-                torch.randint(0, 10, (self.config.batch_size,))
-            )
-            for _ in range(100)
-        ]
+        self.train_dataset = MultiModalDataset(sentinel1_dir='/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1',
+                                                sentinel2_dir='/work/mech-ai-scratch/rtali/gis-sentinel2/final_s2_v3',
+                                                modis_dir='/work/mech-ai-scratch/rtali/gis-modis/modis',
+                                                crop_dir='/work/mech-ai-scratch/rtali/gis-CDL/final_CDL',
+                                                soil_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/SOIL/CRSchange',
+                                                weather_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/WEATHER_TIFFS',)
+                            
+        # self.train_dataset = [
+        #     (
+        #         [
+        #             # Normalize to [-1, 1] as per LIMoE paper
+        #             2 * torch.randn(self.config.batch_size, channels, self.config.image_size, self.config.image_size) - 1
+        #             for channels in self.config.channels
+        #         ],  # List of [batch_size, channels_i, height, width]
+        #         torch.randint(0, 10, (self.config.batch_size,))
+        #     )
+        #     for _ in range(1000)
+        # ]
+        self.val_dataset = MultiModalDataset(sentinel1_dir='/work/mech-ai-scratch/rtali/gis-sentinel1/final_s1',
+                                                sentinel2_dir='/work/mech-ai-scratch/rtali/gis-sentinel2/final_s2_v3',
+                                                modis_dir='/work/mech-ai-scratch/rtali/gis-modis/modis',
+                                                crop_dir='/work/mech-ai-scratch/rtali/gis-CDL/final_CDL',
+                                                soil_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/SOIL/CRSchange',
+                                                weather_dir='/work/mech-ai-scratch/rtali/AI_READY_IOWA/WEATHER_TIFFS',)
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset, batch_size=None, shuffle=True)
+        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.config.batch_size, shuffle=True)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val_dataset, batch_size=None)
+        return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.config.batch_size)
 
 # Main Training Script
 if __name__ == "__main__":
     config = Config()
     model = LIMoELightning(config)
     data_module = SyntheticDataModule(config)
-
+    # data_module.setup()
+    # train_dataloader = data_module.train_dataloader()
+    # for batch in train_dataloader:
+    #     s1,s2,modis = batch
+    #     modalities = [s1,s2,modis]
+    #     for i, m in enumerate(modalities):
+    #         print(f"Modality {i} batch shape: {m.shape}")
+    #     # print(f"Labels shape: {labels.shape}")
+    #     break
+    # pdb.set_trace()
     trainer = pl.Trainer(
         max_steps=config.total_steps,
         accelerator="auto",
