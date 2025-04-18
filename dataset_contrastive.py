@@ -174,9 +174,10 @@ class MultiModalDataset(Dataset):
             weather_patches.append(week_avg)
         weather_tensor = torch.stack(weather_patches, dim=0)
 
-        modalities = [s1_tensor, s2_tensor, modis_tensor, soil_tensor, weather_tensor, cdl_tensor]
-
-        modalities = torch.stack(modalities,dim=0)
+        s1_tensor = torch.cat((s1_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
+        s2_tensor = torch.cat((s2_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
+        modis_tensor = torch.cat((modis_tensor,weather_tensor,soil_tensor,cdl_tensor), dim=0)
+        modalities = [s1_tensor, s2_tensor, modis_tensor]
 
         return modalities
 
