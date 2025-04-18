@@ -76,3 +76,13 @@ def impute_missing_values(time_series_data, time_points, degree=3):
     imputed_data[missing_indices] = imputed_values
 
     return imputed_data
+
+
+if __name__ == "__main__":
+    # Example usage
+    time_points = np.array([1, 2, 3, 4, 5])
+    values = np.array([1.0, np.nan, 3.0, np.nan, 5.0])
+
+    imputed_data = impute_missing_values(values, time_points)
+    print("Original data:", values)
+    print("Imputed data:", imputed_data)
